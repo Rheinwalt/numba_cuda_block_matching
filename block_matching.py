@@ -8,11 +8,14 @@ def cuda_kern_block_matching_ncc(u, v, w, c, p, q, ys, xs, bs, sr):
     b = bs // 2
     bb = b + b + 1
     ofs = b + sr
+    # image pixel coordinates (i, j)
     i, j = cuda.grid(2)
     if ofs <= i and i < ys - ofs and ofs <= j and j < xs - ofs:
         cmax = -1
+        # find best correlation with varying block sizes
         for bi in range(b, 3, -1):
             src = p[i - bi:i + bi + 1, j - bi:j + bi + 1]
+            # brute force search with search radius (sr)
             for n in range(-sr, sr + 1):
                 jn = j + n
                 for m in range(-sr, sr + 1):
@@ -37,6 +40,7 @@ def cuda_kern_block_matching_ncc(u, v, w, c, p, q, ys, xs, bs, sr):
                             tstdev += (tar[ii, jj] - tmean) * (tar[ii, jj] - tmean)
                     cf /= sqrt(sstdev)
                     cf /= sqrt(tstdev)
+                    # update best correlation
                     if cf > cmax:
                         cmax = cf
                         nmax = n
@@ -50,8 +54,10 @@ def cuda_kern_block_matching_ncc(u, v, w, c, p, q, ys, xs, bs, sr):
 
 def block_matching_ncc(p, q, block_size, search_radius):
     ys, xs = p.shape
+    # image dimensions have to match
     assert ys == q.shape[0]
     assert xs == q.shape[1]
+    # minimum block size
     assert block_size > 8
     d_p = cuda.to_device(p.astype("float32"))
     d_q = cuda.to_device(q.astype("float32"))
@@ -59,6 +65,7 @@ def block_matching_ncc(p, q, block_size, search_radius):
     d_v = cuda.device_array((ys, xs), np.float32)
     d_w = cuda.device_array((ys, xs), np.float32)
     d_c = cuda.device_array((ys, xs), np.float32)
+    # adjust to your GPU
     nthreads = (16, 16)
     nblocksy = ys // nthreads[0] + 1
     nblocksx = xs // nthreads[0] + 1
