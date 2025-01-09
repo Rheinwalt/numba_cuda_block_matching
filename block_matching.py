@@ -10,8 +10,13 @@ def cuda_kern_block_matching_ncc(u, v, w, c, p, q, ys, xs, bs, sr):
     ofs = b + sr
     # image pixel coordinates (i, j)
     i, j = cuda.grid(2)
+    if i < ys and j < xs:
+        c[i, j] = np.nan
+        u[i, j] = np.nan
+        v[i, j] = np.nan
+        w[i, j] = np.nan
     if ofs <= i and i < ys - ofs and ofs <= j and j < xs - ofs:
-        cmax = -1
+        cmax = -10
         # find best correlation with varying block sizes
         for bi in range(b, 3, -1):
             src = p[i - bi:i + bi + 1, j - bi:j + bi + 1]
@@ -45,7 +50,7 @@ def cuda_kern_block_matching_ncc(u, v, w, c, p, q, ys, xs, bs, sr):
                         cmax = cf
                         nmax = n
                         mmax = m
-                        wmax = bi
+                        wmax = bi + bi + 1
         c[i, j] = cmax
         u[i, j] = nmax
         v[i, j] = mmax
@@ -127,7 +132,7 @@ def cuda_kern_block_matching_masked_ncc(u, v, w, c, p, q, ir, jr, nn, bs, sr):
                         cmax = cf
                         nmax = n
                         mmax = m
-                        wmax = bi
+                        wmax = bi + bi + 1
         c[i, j] = cmax
         u[i, j] = nmax
         v[i, j] = mmax
@@ -146,10 +151,10 @@ def block_matching_masked_ncc(p, q, mask, block_size, search_radius):
     assert block_size > 8
     ms = mask.astype("bool").copy()
     offset = block_size // 2 + search_radius
-    ms[:offset, :] = 0
-    ms[:, :offset] = 0
-    ms[-offset:, :] = 0
-    ms[:, -offset:] = 0
+    ms[:offset, :] = 1
+    ms[:, :offset] = 1
+    ms[-offset:, :] = 1
+    ms[:, -offset:] = 1
     ir, jr = np.nonzero(~ms)
     d_ir = cuda.to_device(ir.astype("uint64"))
     d_jr = cuda.to_device(jr.astype("uint64"))
