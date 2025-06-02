@@ -3,7 +3,7 @@ from math import sqrt
 from numba import cuda
 
 
-@cuda.jit("float32[:, :], float32[:, :], float32[:, :], float32[:, :], float32[:, :], float32[:, :], int64, int64, int64, int64")
+@cuda.jit("int32[:, :], int32[:, :], int32[:, :], int32[:, :], float32[:, :], float32[:, :], int64, int64, int64, int64")
 def cuda_kern_block_matching_ncc(u, v, w, c, p, q, ys, xs, bs, sr):
     b = bs // 2
     bb = b + b + 1
@@ -11,10 +11,10 @@ def cuda_kern_block_matching_ncc(u, v, w, c, p, q, ys, xs, bs, sr):
     # image pixel coordinates (i, j)
     i, j = cuda.grid(2)
     if i < ys and j < xs:
-        c[i, j] = np.nan
-        u[i, j] = np.nan
-        v[i, j] = np.nan
-        w[i, j] = np.nan
+        c[i, j] = -999
+        u[i, j] = -999
+        v[i, j] = -999
+        w[i, j] = -999
     if ofs <= i and i < ys - ofs and ofs <= j and j < xs - ofs:
         cmax = -10
         # find best correlation with varying block sizes
@@ -51,7 +51,7 @@ def cuda_kern_block_matching_ncc(u, v, w, c, p, q, ys, xs, bs, sr):
                         nmax = n
                         mmax = m
                         wmax = bi + bi + 1
-        c[i, j] = cmax
+        c[i, j] = int(1000 * cmax)
         u[i, j] = nmax
         v[i, j] = mmax
         w[i, j] = wmax
@@ -66,10 +66,10 @@ def block_matching_ncc(p, q, block_size, search_radius):
     assert block_size > 8
     d_p = cuda.to_device(p.astype("float32"))
     d_q = cuda.to_device(q.astype("float32"))
-    d_u = cuda.device_array((ys, xs), np.float32)
-    d_v = cuda.device_array((ys, xs), np.float32)
-    d_w = cuda.device_array((ys, xs), np.float32)
-    d_c = cuda.device_array((ys, xs), np.float32)
+    d_u = cuda.device_array((ys, xs), np.int32)
+    d_v = cuda.device_array((ys, xs), np.int32)
+    d_w = cuda.device_array((ys, xs), np.int32)
+    d_c = cuda.device_array((ys, xs), np.int32)
     # adjust to your GPU
     nthreads = (16, 16)
     nblocksy = ys // nthreads[0] + 1
@@ -81,10 +81,10 @@ def block_matching_ncc(p, q, block_size, search_radius):
     v = d_v.copy_to_host()
     w = d_w.copy_to_host()
     mask = np.isnan(p) + np.isnan(q)
-    u[mask] = np.nan
-    v[mask] = np.nan
-    w[mask] = np.nan
-    c[mask] = np.nan
+    u[mask] = -999
+    v[mask] = -999
+    w[mask] = -999
+    c[mask] = -999
     return (u, v, w, c)
 
 
