@@ -11,7 +11,7 @@ p = gaussian_filter(p, sigma=100)
 p -= p.min()
 p /= p.max()
 p *= 1000
-p = p.astype("int16")
+p = p.astype("uint16")
 q = p.copy()
 q[10:-10, 20:-30] = p[12:-8, 17:-33]
 
@@ -28,7 +28,7 @@ u, v, block_sizes, correlation = block_matching_masked_ncc(p, q, mask, block_siz
 t1 = time()
 
 # new int version
-ui, vi, corri = block_matching_masked_ncc_int(p, q, mask, block_size, search_radius)
+ui, vi, corri = block_matching_masked_ncc_uint_nonzero(p, q, mask, block_size, search_radius)
 
 t2 = time()
 
