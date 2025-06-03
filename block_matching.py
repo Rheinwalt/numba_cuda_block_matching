@@ -230,7 +230,7 @@ def cuda_kern_block_matching_masked_ncc_int(u, v, c, p, q, ir, jr, nn, bs, sr):
         v[i, j] = mmax
 
 
-def block_matching_masked_ncc_int(p, q, mask, block_size, search_radius):
+def block_matching_masked_ncc_int(p, q, mask, block_size, search_radius, nthreads_exp=10):
     ys, xs = p.shape
 
     # image dimensions have to match
@@ -260,7 +260,7 @@ def block_matching_masked_ncc_int(p, q, mask, block_size, search_radius):
     d_c = cuda.device_array((ys, xs), np.uint8)
 
     # GPU thread layout (adjust to your GPU)
-    nthreads = 512
+    nthreads = 2**nthreads_exp
     nblocks = (len(ir) // nthreads) + 1
 
     cuda_kern_block_matching_masked_ncc_int[nblocks, nthreads](d_u, d_v, d_c,
