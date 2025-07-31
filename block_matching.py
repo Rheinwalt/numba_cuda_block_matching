@@ -184,8 +184,8 @@ def block_matching_masked_ncc(p, q, mask, block_size, search_radius):
     return (u, v, w, c)
 
 
-@cuda.jit("int8[:, :], int8[:, :], uint8[:, :], uint16[:, :], uint16[:, :], uint64[:], uint64[:], uint64, int64, int64")
-def cuda_kern_block_matching_masked_ncc_uint_nonzero(u, v, c, p, q, ir, jr, nn, bs, sr):
+@cuda.jit("int8[:, :], int8[:, :], uint8[:, :], float32[:, :], uint16[:, :], uint16[:, :], uint64[:], uint64[:], uint64, int64, int64")
+def cuda_kern_block_matching_masked_ncc_uint_nonzero(u, v, c, s, p, q, ir, jr, nn, bs, sr):
     b = bs // 2
     bb = b + b + 1
     ofs = b + sr
@@ -196,6 +196,21 @@ def cuda_kern_block_matching_masked_ncc_uint_nonzero(u, v, c, p, q, ir, jr, nn, 
         j = jr[k]
         cmax = -1.0
         src = p[i - b:i + b + 1, j - b:j + b + 1]
+        smean = 0.0
+        sn = 0
+        # masking out zeros (NaNs)
+        for ii in range(bb):
+            for jj in range(bb):
+                if src[ii, jj]:
+                    smean += src[ii, jj]
+                    sn += 1
+        smean /= sn
+        sstdev = 0.0
+        for ii in range(bb):
+            for jj in range(bb):
+                if src[ii, jj]:
+                    sstdev += (src[ii, jj] - smean) * (src[ii, jj] - smean)
+        sstdev = sqrt(sstdev)
         # brute force search with search radius (sr)
         for n in range(-sr, sr + 1):
             jn = j + n
@@ -203,31 +218,23 @@ def cuda_kern_block_matching_masked_ncc_uint_nonzero(u, v, c, p, q, ir, jr, nn, 
                 im = i + m
                 tar = q[im - b:im + b + 1, jn - b:jn + b + 1]
                 # cost func (ncc)
-                smean = 0.0
                 tmean = 0.0
-                sn = 0
                 tn = 0
                 # masking out zeros (NaNs)
                 for ii in range(bb):
                     for jj in range(bb):
-                        if src[ii, jj]:
-                            smean += src[ii, jj]
-                            sn += 1
                         if tar[ii, jj]:
                             tmean += tar[ii, jj]
                             tn += 1
-                smean /= sn
                 tmean /= tn
                 cf = 0.0
-                sstdev = 0.0
                 tstdev = 0.0
                 for ii in range(bb):
                     for jj in range(bb):
                         if src[ii, jj] and tar[ii, jj]:
                             cf += (src[ii, jj] - smean) * (tar[ii, jj] - tmean)
-                            sstdev += (src[ii, jj] - smean) * (src[ii, jj] - smean)
                             tstdev += (tar[ii, jj] - tmean) * (tar[ii, jj] - tmean)
-                cf /= sqrt(sstdev)
+                cf /= sstdev
                 cf /= sqrt(tstdev)
                 if cf > cmax:
                     cmax = cf
@@ -236,6 +243,7 @@ def cuda_kern_block_matching_masked_ncc_uint_nonzero(u, v, c, p, q, ir, jr, nn, 
         c[i, j] = int(255 * cmax)
         u[i, j] = nmax
         v[i, j] = mmax
+        s[i, j] = sstdev
 
 
 def block_matching_masked_ncc_uint_nonzero(p, q, mask, block_size, search_radius, nthreads_exp=10):
@@ -268,20 +276,23 @@ def block_matching_masked_ncc_uint_nonzero(p, q, mask, block_size, search_radius
     d_u = cuda.device_array((ys, xs), np.int8)
     d_v = cuda.device_array((ys, xs), np.int8)
     d_c = cuda.device_array((ys, xs), np.uint8)
+    d_s = cuda.device_array((ys, xs), np.float32)
 
     # GPU thread layout (adjust to your GPU)
     nthreads = 2**nthreads_exp
     nblocks = (len(ir) // nthreads) + 1
 
-    cuda_kern_block_matching_masked_ncc_uint_nonzero[nblocks, nthreads](d_u, d_v, d_c,
+    cuda_kern_block_matching_masked_ncc_uint_nonzero[nblocks, nthreads](d_u, d_v, d_c, d_s,
         d_p, d_q, d_ir, d_jr, len(ir), block_size, search_radius)
     c = d_c.copy_to_host()
     u = d_u.copy_to_host()
     v = d_v.copy_to_host()
+    s = d_s.copy_to_host()
 
     # NaN
     u[ms] = -128
     v[ms] = -128
     c[ms] = 0
-    return (u, v, c)
+    s[ms] = np.nan
+    return (u, v, c, s)
 
