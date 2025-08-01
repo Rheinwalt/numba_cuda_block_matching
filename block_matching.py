@@ -102,6 +102,16 @@ def cuda_kern_block_matching_masked_ncc(u, v, w, c, p, q, ir, jr, nn, bs, sr):
         # find best correlation with varying block sizes
         for bi in range(b, 3, -1):
             src = p[i - bi:i + bi + 1, j - bi:j + bi + 1]
+            smean = 0.0
+            for ii in range(bi + bi + 1):
+                for jj in range(bi + bi + 1):
+                    smean += src[ii, jj]
+            smean /= (bi + bi + 1) * (bi + bi + 1)
+            sstdev = 0.0
+            for ii in range(bi + bi + 1):
+                for jj in range(bi + bi + 1):
+                    sstdev += (src[ii, jj] - smean) * (src[ii, jj] - smean)
+            sstdev = sqrt(sstdev)
             # brute force search with search radius (sr)
             for n in range(-sr, sr + 1):
                 jn = j + n
@@ -109,23 +119,18 @@ def cuda_kern_block_matching_masked_ncc(u, v, w, c, p, q, ir, jr, nn, bs, sr):
                     im = i + m
                     tar = q[im - bi:im + bi + 1, jn - bi:jn + bi + 1]
                     # cost func (ncc)
-                    smean = 0.0
                     tmean = 0.0
                     for ii in range(bi + bi + 1):
                         for jj in range(bi + bi + 1):
-                            smean += src[ii, jj]
                             tmean += tar[ii, jj]
-                    smean /= (bi + bi + 1) * (bi + bi + 1)
                     tmean /= (bi + bi + 1) * (bi + bi + 1)
                     cf = 0.0
-                    sstdev = 0.0
                     tstdev = 0.0
                     for ii in range(bi + bi + 1):
                         for jj in range(bi + bi + 1):
                             cf += (src[ii, jj] - smean) * (tar[ii, jj] - tmean)
-                            sstdev += (src[ii, jj] - smean) * (src[ii, jj] - smean)
                             tstdev += (tar[ii, jj] - tmean) * (tar[ii, jj] - tmean)
-                    cf /= sqrt(sstdev)
+                    cf /= sstdev
                     cf /= sqrt(tstdev)
                     # update best correlation
                     if cf > cmax:
