@@ -302,15 +302,16 @@ def block_matching_masked_ncc_uint_nonzero(p, q, mask, block_size, search_radius
     return (u, v, c, s)
 
 
-@cuda.jit("int8[:, :, :], int8[:, :, :], uint8[:, :, :], float32[:, :], uint16[:, :], uint16[:, :], uint64[:], uint64[:], uint64, uint64, int64, int64")
-def cuda_kern_block_matching_masked_ncc_uint_nonzero_multiple(u, v, c, s, p, q, ir, jr, nn, nbc, bs, sr):
+@cuda.jit("int8[:, :, :], int8[:, :, :], uint8[:, :, :], uint16[:, :], uint16[:, :], uint64[:], uint64[:], uint64, int64, int64")
+def cuda_kern_block_matching_masked_ncc_uint_nonzero_multiple(u, v, c, p, q, ir, jr, nn, bs, sr):
     b = bs // 2
     bb = b + b + 1
     ofs = b + sr
+    nbc = 10
     # image pixel coordinates (i, j) via (ir[k], jr[k])
     k = cuda.grid(1)
     if k < nn:
-        ncmax = cuda.local.array((nbc,), np.float32)
+        ncmax = cuda.local.array((nbc,), np.uint8)
         nnmax = cuda.local.array((nbc,), np.int8)
         nmmax = cuda.local.array((nbc,), np.int8)
         for ii in range(nbc):
@@ -359,24 +360,26 @@ def cuda_kern_block_matching_masked_ncc_uint_nonzero_multiple(u, v, c, s, p, q, 
                             tstdev += (tar[ii, jj] - tmean) * (tar[ii, jj] - tmean)
                 cf /= sstdev
                 cf /= sqrt(tstdev)
-                if cf > cmax:
-                    cmax = cf
-                    for ii in range(nbc - 1, 0, -1):
-                        ncmax[i] = ncmax[i - 1]
-                        nnmax[i] = nnmax[i - 1]
-                        nmmax[i] = nmmax[i - 1]
-                    ncmax[0] = cmax
-                    nnmax[0] = n
-                    nmmax[0] = m
+                icf = int(255 * cf)
+                for ii in range(nbc):
+                    if icf > ncmax[ii]:
+                        for jj in range(nbc - 1, ii, -1):
+                            ncmax[i] = ncmax[i - 1]
+                            nnmax[i] = nnmax[i - 1]
+                            nmmax[i] = nmmax[i - 1]
+                        ncmax[ii] = icf
+                        nnmax[ii] = n
+                        nmmax[ii] = m
+                        break
         for ii in range(nbc):
-            c[i, j, ii] = int(255 * ncmax[ii])
+            c[i, j, ii] = ncmax[ii]
             u[i, j, ii] = nnmax[ii]
             v[i, j, ii] = nmmax[ii]
-        s[i, j] = sstdev
 
 
-def block_matching_masked_ncc_uint_nonzero_multiple(p, q, mask, block_size, search_radius, nthreads_exp=10, nbest_corr=5):
+def block_matching_masked_ncc_uint_nonzero_multiple(p, q, mask, block_size, search_radius, nthreads_exp=10):
     ys, xs = p.shape
+    nbest_corr = 10
 
     # image dimensions have to match
     assert ys == q.shape[0]
@@ -405,23 +408,20 @@ def block_matching_masked_ncc_uint_nonzero_multiple(p, q, mask, block_size, sear
     d_u = cuda.device_array((ys, xs, nbest_corr), np.int8)
     d_v = cuda.device_array((ys, xs, nbest_corr), np.int8)
     d_c = cuda.device_array((ys, xs, nbest_corr), np.uint8)
-    d_s = cuda.device_array((ys, xs), np.float32)
 
     # GPU thread layout (adjust to your GPU)
     nthreads = 2**nthreads_exp
     nblocks = (len(ir) // nthreads) + 1
 
-    cuda_kern_block_matching_masked_ncc_uint_nonzero[nblocks, nthreads](d_u, d_v, d_c, d_s,
-        d_p, d_q, d_ir, d_jr, len(ir), nbest_corr, block_size, search_radius)
+    cuda_kern_block_matching_masked_ncc_uint_nonzero_multiple[nblocks, nthreads](d_u, d_v, d_c,
+        d_p, d_q, d_ir, d_jr, len(ir), block_size, search_radius)
     c = d_c.copy_to_host()
     u = d_u.copy_to_host()
     v = d_v.copy_to_host()
-    s = d_s.copy_to_host()
 
     # NaN
     for i in range(nbest_corr):
         u[ms, i] = -128
         v[ms, i] = -128
         c[ms, i] = 0
-    s[ms] = np.nan
-    return (u, v, c, s)
+    return (u, v, c)
