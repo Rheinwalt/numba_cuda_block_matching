@@ -364,9 +364,9 @@ def cuda_kern_block_matching_masked_ncc_uint_nonzero_multiple(u, v, c, p, q, ir,
                 for ii in range(nbc):
                     if icf > ncmax[ii]:
                         for jj in range(nbc - 1, ii, -1):
-                            ncmax[i] = ncmax[i - 1]
-                            nnmax[i] = nnmax[i - 1]
-                            nmmax[i] = nmmax[i - 1]
+                            ncmax[jj] = ncmax[jj - 1]
+                            nnmax[jj] = nnmax[jj - 1]
+                            nmmax[jj] = nmmax[jj - 1]
                         ncmax[ii] = icf
                         nnmax[ii] = n
                         nmmax[ii] = m
