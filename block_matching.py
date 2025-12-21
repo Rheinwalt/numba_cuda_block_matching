@@ -189,6 +189,117 @@ def block_matching_masked_ncc(p, q, mask, block_size, search_radius):
     return (u, v, w, c)
 
 
+@cuda.jit("int8[:, :], int8[:, :], int8[:, :, :, :], uint16[:, :], uint16[:, :], uint64[:], uint64[:], uint64, int64, int64")
+def cuda_kern_block_matching_masked_ncc_uint_nonzero_fullc(u, v, c, p, q, ir, jr, nn, bs, sr):
+    b = bs // 2
+    bb = b + b + 1
+    ofs = b + sr
+    # image pixel coordinates (i, j) via (ir[k], jr[k])
+    k = cuda.grid(1)
+    if k < nn:
+        i = ir[k]
+        j = jr[k]
+        cmax = -1.0
+        src = p[i - b:i + b + 1, j - b:j + b + 1]
+        smean = 0.0
+        sn = 0
+        # masking out zeros (NaNs)
+        for ii in range(bb):
+            for jj in range(bb):
+                if src[ii, jj]:
+                    smean += src[ii, jj]
+                    sn += 1
+        smean /= sn
+        sstdev = 0.0
+        for ii in range(bb):
+            for jj in range(bb):
+                if src[ii, jj]:
+                    sstdev += (src[ii, jj] - smean) * (src[ii, jj] - smean)
+        sstdev = sqrt(sstdev)
+        # brute force search with search radius (sr)
+        for n in range(-sr, sr + 1):
+            jn = j + n
+            for m in range(-sr, sr + 1):
+                im = i + m
+                tar = q[im - b:im + b + 1, jn - b:jn + b + 1]
+                # cost func (ncc)
+                tmean = 0.0
+                tn = 0
+                # masking out zeros (NaNs)
+                for ii in range(bb):
+                    for jj in range(bb):
+                        if tar[ii, jj]:
+                            tmean += tar[ii, jj]
+                            tn += 1
+                tmean /= tn
+                cf = 0.0
+                tstdev = 0.0
+                for ii in range(bb):
+                    for jj in range(bb):
+                        if src[ii, jj] and tar[ii, jj]:
+                            cf += (src[ii, jj] - smean) * (tar[ii, jj] - tmean)
+                            tstdev += (tar[ii, jj] - tmean) * (tar[ii, jj] - tmean)
+                cf /= sstdev
+                cf /= sqrt(tstdev)
+                if cf > cmax:
+                    cmax = cf
+                    nmax = n
+                    mmax = m
+                # int8 -128 .. 127
+                c[i, j, n+sr, m+sr] = int(127 * cmax)
+        u[i, j] = nmax
+        v[i, j] = mmax
+
+
+def block_matching_masked_ncc_uint_nonzero_fullc(p, q, mask, block_size, search_radius, nthreads_exp=10):
+    ys, xs = p.shape
+    sr = int(search_radius)
+
+    # image dimensions have to match
+    assert ys == q.shape[0]
+    assert xs == q.shape[1]
+
+    # mask dimensions have to match
+    assert ys == mask.shape[0]
+    assert xs == mask.shape[1]
+
+    # mask layout
+    ms = mask.astype(np.bool).copy()
+    offset = block_size // 2 + sr
+    ms[:offset, :] = True
+    ms[:, :offset] = True
+    ms[-offset:, :] = True
+    ms[:, -offset:] = True
+    ms += (p == 0)
+    ms += (q == 0)
+    ir, jr = np.nonzero(~ms)
+
+    # cuda device arrays
+    d_ir = cuda.to_device(ir.astype(np.uint64))
+    d_jr = cuda.to_device(jr.astype(np.uint64))
+    d_p = cuda.to_device(p.astype(np.uint16))
+    d_q = cuda.to_device(q.astype(np.uint16))
+    d_u = cuda.device_array((ys, xs), np.int8)
+    d_v = cuda.device_array((ys, xs), np.int8)
+    d_c = cuda.device_array((ys, xs, sr, sr), np.int8)
+
+    # GPU thread layout (adjust to your GPU)
+    nthreads = 2**nthreads_exp
+    nblocks = (len(ir) // nthreads) + 1
+
+    cuda_kern_block_matching_masked_ncc_uint_nonzero_fullc[nblocks, nthreads](d_u, d_v, d_c,
+        d_p, d_q, d_ir, d_jr, len(ir), block_size, search_radius)
+    c = d_c.copy_to_host()
+    u = d_u.copy_to_host()
+    v = d_v.copy_to_host()
+
+    # NaN
+    u[ms] = -128
+    v[ms] = -128
+    c[ms, :, :] = 0
+    return (u, v, c)
+
+
 @cuda.jit("int8[:, :], int8[:, :], uint8[:, :], float32[:, :], uint16[:, :], uint16[:, :], uint64[:], uint64[:], uint64, int64, int64")
 def cuda_kern_block_matching_masked_ncc_uint_nonzero(u, v, c, s, p, q, ir, jr, nn, bs, sr):
     b = bs // 2
