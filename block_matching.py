@@ -189,8 +189,8 @@ def block_matching_masked_ncc(p, q, mask, block_size, search_radius):
     return (u, v, w, c)
 
 
-@cuda.jit("int8[:, :], int8[:, :], int8[:, :, :, :], uint16[:, :], uint16[:, :], uint64[:], uint64[:], uint64, int64, int64")
-def cuda_kern_block_matching_masked_ncc_uint_nonzero_fullc(u, v, c, p, q, ir, jr, nn, bs, sr):
+@cuda.jit("int8[:, :, :], uint16[:, :], uint16[:, :], uint64[:], uint64[:], uint64, int64, int64")
+def cuda_kern_block_matching_masked_ncc_uint_nonzero_fullc(c, p, q, ir, jr, nn, bs, sr):
     b = bs // 2
     bb = b + b + 1
     ofs = b + sr
@@ -199,7 +199,6 @@ def cuda_kern_block_matching_masked_ncc_uint_nonzero_fullc(u, v, c, p, q, ir, jr
     if k < nn:
         i = ir[k]
         j = jr[k]
-        cmax = -1.0
         src = p[i - b:i + b + 1, j - b:j + b + 1]
         smean = 0.0
         sn = 0
@@ -241,19 +240,14 @@ def cuda_kern_block_matching_masked_ncc_uint_nonzero_fullc(u, v, c, p, q, ir, jr
                             tstdev += (tar[ii, jj] - tmean) * (tar[ii, jj] - tmean)
                 cf /= sstdev
                 cf /= sqrt(tstdev)
-                if cf > cmax:
-                    cmax = cf
-                    nmax = n
-                    mmax = m
                 # int8 -128 .. 127
-                c[i, j, n+sr, m+sr] = int(127 * cmax)
-        u[i, j] = nmax
-        v[i, j] = mmax
+                c[k, n+sr, m+sr] = int(127 * cf)
 
 
 def block_matching_masked_ncc_uint_nonzero_fullc(p, q, mask, block_size, search_radius, nthreads_exp=10):
     ys, xs = p.shape
     sr = int(search_radius)
+    srsr = sr + sr + 1
 
     # image dimensions have to match
     assert ys == q.shape[0]
@@ -279,25 +273,16 @@ def block_matching_masked_ncc_uint_nonzero_fullc(p, q, mask, block_size, search_
     d_jr = cuda.to_device(jr.astype(np.uint64))
     d_p = cuda.to_device(p.astype(np.uint16))
     d_q = cuda.to_device(q.astype(np.uint16))
-    d_u = cuda.device_array((ys, xs), np.int8)
-    d_v = cuda.device_array((ys, xs), np.int8)
-    d_c = cuda.device_array((ys, xs, sr, sr), np.int8)
+    d_c = cuda.device_array((len(ir), srsr, srsr), np.int8)
 
     # GPU thread layout (adjust to your GPU)
     nthreads = 2**nthreads_exp
     nblocks = (len(ir) // nthreads) + 1
 
-    cuda_kern_block_matching_masked_ncc_uint_nonzero_fullc[nblocks, nthreads](d_u, d_v, d_c,
-        d_p, d_q, d_ir, d_jr, len(ir), block_size, search_radius)
+    cuda_kern_block_matching_masked_ncc_uint_nonzero_fullc[nblocks, nthreads](
+            d_c, d_p, d_q, d_ir, d_jr, len(ir), block_size, search_radius)
     c = d_c.copy_to_host()
-    u = d_u.copy_to_host()
-    v = d_v.copy_to_host()
-
-    # NaN
-    u[ms] = -128
-    v[ms] = -128
-    c[ms, :, :] = 0
-    return (u, v, c)
+    return c
 
 
 @cuda.jit("int8[:, :], int8[:, :], uint8[:, :], float32[:, :], uint16[:, :], uint16[:, :], uint64[:], uint64[:], uint64, int64, int64")
