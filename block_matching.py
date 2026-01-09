@@ -282,7 +282,7 @@ def block_matching_masked_ncc_uint_nonzero_fullc(p, q, mask, block_size, search_
     cuda_kern_block_matching_masked_ncc_uint_nonzero_fullc[nblocks, nthreads](
             d_c, d_p, d_q, d_ir, d_jr, len(ir), block_size, search_radius)
     c = d_c.copy_to_host()
-    return c
+    return (c, ir, jr)
 
 
 @cuda.jit("int8[:, :], int8[:, :], uint8[:, :], float32[:, :], uint16[:, :], uint16[:, :], uint64[:], uint64[:], uint64, int64, int64")
