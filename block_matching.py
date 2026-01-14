@@ -216,10 +216,10 @@ def cuda_kern_block_matching_masked_ncc_uint_nonzero_fullc(c, p, q, ir, jr, nn, 
                     sstdev += (src[ii, jj] - smean) * (src[ii, jj] - smean)
         sstdev = sqrt(sstdev)
         # brute force search with search radius (sr)
-        for n in range(-sr, sr + 1):
-            jn = j + n
-            for m in range(-sr, sr + 1):
-                im = i + m
+        for m in range(-sr, sr + 1):
+            im = i + m
+            for n in range(-sr, sr + 1):
+                jn = j + n
                 tar = q[im - b:im + b + 1, jn - b:jn + b + 1]
                 # cost func (ncc)
                 tmean = 0.0
@@ -241,7 +241,7 @@ def cuda_kern_block_matching_masked_ncc_uint_nonzero_fullc(c, p, q, ir, jr, nn, 
                 cf /= sstdev
                 cf /= sqrt(tstdev)
                 # int8 -128 .. 127
-                c[k, n+sr, m+sr] = int(127 * cf)
+                c[k, m+sr, n+sr] = int(127 * cf)
 
 
 def block_matching_masked_ncc_uint_nonzero_fullc(p, q, mask, block_size, search_radius, nthreads_exp=10):
