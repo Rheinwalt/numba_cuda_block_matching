@@ -78,7 +78,9 @@ def cuda_kern_block_matching_masked_ncc_uint_nonzero_fb(
     cstd8[i, j] = 0
     sstd16[i, j] = 0
     tstd16[i, j] = 0
-    efb2[i, j] = 0
+
+    # UINT16_MAX means that no usable backward match was found.
+    efb2[i, j] = 65535
 
     # forward p -> q
     best_c = np.float32(-2.0)
@@ -229,15 +231,27 @@ def cuda_kern_block_matching_masked_ncc_uint_nonzero_fb(
 def block_matching_masked_ncc_uint_nonzero_fb(
         p, q, mask, block_size, search_radius,
         min_valid_frac=0.5, nthreads_exp=10):
+    if p.ndim != 2 or q.ndim != 2 or mask.ndim != 2:
+        raise ValueError("p, q, and mask must all be 2-D arrays")
+
     ys, xs = p.shape
-    assert q.shape == p.shape
-    assert mask.shape == p.shape
+    if q.shape != p.shape or mask.shape != p.shape:
+        raise ValueError("p, q, and mask must have the same shape")
 
     bs = int(block_size)
     sr = int(search_radius)
-    assert bs > 0
-    assert sr > 0
-    assert 0.0 < min_valid_frac <= 1.0
+    if bs != block_size or bs <= 0 or bs % 2 == 0:
+        raise ValueError("block_size must be a positive odd integer")
+    if sr != search_radius or not 0 < sr <= 127:
+        raise ValueError(
+            "search_radius must be an integer in [1, 127] because u and v "
+            "are stored as int8 (-128 is reserved for nodata)"
+        )
+    if not 0.0 < min_valid_frac <= 1.0:
+        raise ValueError("min_valid_frac must be in (0, 1]")
+    if int(nthreads_exp) != nthreads_exp or not 0 <= nthreads_exp <= 10:
+        raise ValueError("nthreads_exp must be an integer in [0, 10]")
+    nthreads_exp = int(nthreads_exp)
 
     # actual odd block width used by kernel
     b = bs // 2
@@ -261,8 +275,8 @@ def block_matching_masked_ncc_uint_nonzero_fb(
     ir, jr = np.nonzero(~ms)
 
     # input arrays
-    d_ir = cuda.to_device(ir.astype(np.uint64))
-    d_jr = cuda.to_device(jr.astype(np.uint64))
+    d_ir = cuda.to_device(ir.astype(np.int32))
+    d_jr = cuda.to_device(jr.astype(np.int32))
     d_p = cuda.to_device(p.astype(np.uint16))
     d_q = cuda.to_device(q.astype(np.uint16))
 
