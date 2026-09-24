@@ -107,8 +107,14 @@ def cuda_kern_block_matching_masked_ncc_uint_nonzero_fb(
             )
 
             if cf > -1.5:
-                csum += cf
-                csum2 += cf * cf
+                # Negative correlations cannot compete with a positive peak.
+                # Treat them as zero in the search-surface statistics while
+                # retaining the original value for selection of the maximum.
+                cq = cf
+                if cq < 0.0:
+                    cq = np.float32(0.0)
+                csum += cq
+                csum2 += cq * cq
                 nc += 1
                 if cf > best_c:
                     best_c = cf
@@ -271,8 +277,14 @@ def cuda_kern_block_matching_masked_ncc_uint_nonzero(
             )
 
             if cf > -1.5:
-                csum += cf
-                csum2 += cf * cf
+                # Negative correlations cannot compete with a positive peak.
+                # Treat them as zero in the search-surface statistics while
+                # retaining the original value for selection of the maximum.
+                cq = cf
+                if cq < 0.0:
+                    cq = np.float32(0.0)
+                csum += cq
+                csum2 += cq * cq
                 nc += 1
                 if cf > best_c:
                     best_c = cf
